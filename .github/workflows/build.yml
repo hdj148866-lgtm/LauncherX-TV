@@ -1,85 +1,35 @@
 
-name: Build LauncherX APK
-
-on:
-  workflow_dispatch:
-  push:
-    branches:
-      - main
-
-permissions:
-  contents: read
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Extract ZIP
+      - name: Detect and prepare Android project
         run: |
           set -e
-          mkdir -p extracted
-          unzip -q Launcherx-main.zip -d extracted
 
-      - name: Inspect project
-        run: |
-          echo "===== PROJECT FILES ====="
-          find extracted/Launcherx-main -maxdepth 3 -type f | head -150
+          echo "=== Searching for Android project ==="
 
-          echo "===== PACKAGE JSON ====="
-          if [ -f extracted/Launcherx-main/package.json ]; then
-            cat extracted/Launcherx-main/package.json
-          fi
-
-          echo "===== ANDROID BUILD FILES ====="
           find extracted -type f \( \
             -name gradlew -o \
             -name settings.gradle -o \
             -name settings.gradle.kts -o \
             -name build.gradle -o \
-            -name build.gradle.kts \
-          \) | head -100
+            -name build.gradle.kts -o \
+            -name app.json -o \
+            -name package.json \
+          \) -not -path "*/node_modules/*" | head -200
 
-      - name: Check Android project
-        run: |
-          set -e
+          if find extracted -type f -name gradlew \
+              -not -path "*/node_modules/*" | grep -q .; then
+            echo "Gradle wrapper found."
+          else
+            echo "Gradle wrapper missing."
+            echo "Checking project type..."
 
-          GRADLEW=$(find extracted -type f \
-            -name gradlew | head -1)
+            if [ -f extracted/Launcherx-main/package.json ]; then
+              node -e "
+                const p = require('./extracted/Launcherx-main/package.json');
+                console.log('Project:', p.name || 'Unnamed');
+                console.log('Scripts:', JSON.stringify(p.scripts || {}));
+                console.log('Dependencies:', JSON.stringify(p.dependencies || {}));
+              "
+            fi
 
-          if [ -z "$GRADLEW" ]; then
-            echo "No Gradle wrapper found."
-            echo "The project may need Android build files."
-            exit 1
+            echo "Automatic detection completed."
           fi
-
-          ANDROID_DIR=$(dirname "$GRADLEW")
-          echo "ANDROID_DIR=$ANDROID_DIR" >> "$GITHUB_ENV"
-          chmod +x "$GRADLEW"
-
-      - name: Build APK
-        run: |
-          cd "$ANDROID_DIR"
-          ./gradlew --no-daemon assembleDebug
-
-      - name: Upload APK
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: LauncherX-APK
-          path: extracted/**/android/app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
