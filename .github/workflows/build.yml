@@ -3,8 +3,7 @@ name: Build LauncherX APK
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -29,95 +28,77 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Check project files
+      - name: Locate project files
         run: |
-          echo "Checking project structure..."
-          test -f PS5Launcher/package.json || {
-            echo "ERROR: PS5Launcher/package.json not found"
-            exit 1
-          }
-          test -f PS5Launcher/android/gradlew || {
-            echo "ERROR: Android Gradle wrapper not found"
-            exit 1
-          }
-          test -f PS5Launcher/android/app/build.gradle || {
-            echo "ERROR: app/build.gradle not found"
-            exit 1
-          }
+          echo "Repository contents:"
+          ls -la
 
-      - name: Install dependencies
-        working-directory: PS5Launcher
+          echo "Searching for package.json..."
+          find . -type f -name package.json \
+            -not -path "*/node_modules/*" \
+            -not -path "*/.git/*" | head -50
+
+          echo "Searching for Gradle wrapper..."
+          find . -type f -name gradlew \
+            -not -path "*/node_modules/*" | head -30
+
+          echo "Searching for project ZIP files..."
+          find . -maxdepth 3 -type f -name "*.zip"
+
+      - name: Stop and report project location
         run: |
-          if [ -f package-lock.json ]; then
-            npm ci
-          else
-            npm install
-          fi
+          echo "Project location scan completed."
+          echo "Check the log above to identify the actual project folder."
+          exit 1
 
-      - name: Configure Android package
-        working-directory: PS5Launcher
-        run: |
-          node <<'NODE'
-          const fs = require('fs');
+name: Build LauncherX APK
 
-          const file = 'android/app/build.gradle';
-          const gradle = fs.readFileSync(file, 'utf8');
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
 
-          const match = gradle.match(
-            /applicationId\s+["']([^"']+)["']/
-          );
+permissions:
+  contents: read
 
-          if (!match) {
-            console.error(
-              'ERROR: applicationId not found in build.gradle'
-            );
-            process.exit(1);
-          }
+jobs:
+  build:
+    runs-on: ubuntu-latest
 
-          const packageName = match[1];
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-          fs.writeFileSync(
-            'react-native.config.js',
-            `module.exports = {
-              project: {
-                android: {
-                  packageName: '${packageName}',
-                },
-              },
-            };\n`
-          );
-
-          console.log('Android package:', packageName);
-          NODE
-
-      - name: Verify React Native configuration
-        working-directory: PS5Launcher
-        run: |
-          npx react-native config > rn-config.json
-
-          node <<'NODE'
-          const config = require('./rn-config.json');
-          const name = config.project?.android?.packageName;
-
-          if (!name) {
-            console.error(
-              'ERROR: React Native Android packageName is missing'
-            );
-            process.exit(1);
-          }
-
-          console.log('Verified Android package:', name);
-          NODE
-
-      - name: Build APK
-        working-directory: PS5Launcher/android
-        run: |
-          chmod +x gradlew
-          ./gradlew --no-daemon assembleDebug
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - name: Set up Java
+        uses: actions/setup-java@v4
         with:
-          name: LauncherX-APK
-          path: PS5Launcher/android/app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Locate project files
+        run: |
+          echo "Repository contents:"
+          ls -la
+
+          echo "Searching for package.json..."
+          find . -type f -name package.json \
+            -not -path "*/node_modules/*" \
+            -not -path "*/.git/*" | head -50
+
+          echo "Searching for Gradle wrapper..."
+          find . -type f -name gradlew \
+            -not -path "*/node_modules/*" | head -30
+
+          echo "Searching for project ZIP files..."
+          find . -maxdepth 3 -type f -name "*.zip"
+
+      - name: Stop and report project location
+        run: |
+          echo "Project location scan completed."
+          echo "Check the log above to identify the actual project folder."
+          exit 1
