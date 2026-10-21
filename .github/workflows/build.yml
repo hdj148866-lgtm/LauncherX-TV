@@ -39,18 +39,21 @@ jobs:
             -name build.gradle.kts \
           \) -print
 
-      - name: Build Android APK
+      
+      - name: Inspect extracted project
         run: |
-          set -e
-          GRADLEW=$(find extracted -type f -name gradlew | head -1)
-          if [ -z "$GRADLEW" ]; then
-            echo "No Gradle wrapper found. Project type must be identified."
-            exit 1
-          fi
-          PROJECT_DIR=$(dirname "$GRADLEW")
-          cd "$PROJECT_DIR"
-          chmod +x gradlew
-          ./gradlew assembleDebug
+          echo "=== ROOT FILES ==="
+          find extracted -maxdepth 3 -type f | head -150
+          echo "=== PROJECT MARKERS ==="
+          find extracted -type f \( \
+            -name package.json -o \
+            -name app.json -o \
+            -name gradlew -o \
+            -name settings.gradle -o \
+            -name settings.gradle.kts -o \
+            -name AndroidManifest.xml \
+          \) -print
+          
 
       - name: Upload APK
         if: success()
