@@ -1,4 +1,3 @@
-
 name: Build LauncherX APK
 
 on:
@@ -28,26 +27,109 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Locate project files
+      - name: Extract project ZIP
         run: |
-          echo "Repository contents:"
-          ls -la
+          set -e
+          ZIP_FILE="Launcherx-main.zip"
 
-          echo "Searching for package.json..."
-          find . -type f -name package.json \
-            -not -path "*/node_modules/*" \
-            -not -path "*/.git/*" | head -50
+          if [ ! -f "$ZIP_FILE" ]; then
+            echo "ERROR: Launcherx-main.zip not found"
+            exit 1
+          fi
 
-          echo "Searching for Gradle wrapper..."
-          find . -type f -name gradlew \
-            -not -path "*/node_modules/*" | head -30
+          mkdir -p extracted
+          unzip -q "$ZIP_FILE" -d extracted
 
-          echo "Searching for project ZIP files..."
-          find . -maxdepth 3 -type f -name "*.zip"
+          echo "Extracted project files:"
+          ls -la extracted
 
-      - name: Stop and report project location
+      - name: Locate Android project
         run: |
-          echo "Project location scan completed."
-          echo "Check the log above to identify the actual project folder."
-          exit 1
-          
+          set -e
+
+          GRADLEW=$(find extracted -type f \
+            -name gradlew | head -1)
+
+          if [ -z "$GRADLEW" ]; then
+            echo "ERROR: No gradlew found inside ZIP"
+            echo "Searching for Android build files:"
+            find extracted -type f \
+              \( -name build.gradle \
+              -o -name build.gradle.kts \
+              -o -name package.json \) | head -100
+            exit 1
+          fi
+
+          ANDROID_DIR=$(dirname "$GRADLEW")
+          PROJECT_DIR=$(dirname "$ANDROID_DIR")
+
+          echo "ANDROID_DIR=$ANDROID_DIR" >> "$GITHUB_ENV"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+          chmod +x "$GRADLEW"
+
+          echo "Android directory: $ANDROID_DIR"
+          echo "Project directory: $PROJECT_DIR"
+          ls -la "$PROJECT_DIR"
+
+      - name: Install Node dependencies
+        run: |
+          set -e
+
+          if [ -f "$PROJECT_DIR/package-lock.json" ]; then
+            cd "$PROJECT_DIR"
+            npm ci
+          elif [ -f "$PROJECT_DIR/package.json" ]; then
+            cd "$PROJECT_DIR"
+            npm install
+          else
+            echo "ERROR: package.json not found beside Android directory"
+            find extracted -type f \
+              -name package.json | head -50
+            exit 1
+          fi
+
+      - name: Configure React Native package
+        run: |
+          set -e
+
+          GRADLE_FILE="$ANDROID_DIR/app/build.gradle"
+
+          if [ ! -f "$GRADLE_FILE" ]; then
+            GRADLE_FILE="$ANDROID_DIR/app/build.gradle.kts"
+          fi
+
+          if [ ! -f "$GRADLE_FILE" ]; then
+            echo "ERROR: Android app Gradle file not found"
+            exit 1
+          fi
+
+          PACKAGE_NAME=$(grep -E \
+            'applicationId[[:space:]]+["'\''][^"'\'']+["'\'']' \
+            "$GRADLE_FILE" | head -1 | \
+            sed -E 's/.*applicationId[[:space:]]+["'\'']([^"'\'']+)["'\''].*/\1/')
+
+          if [ -z "$PACKAGE_NAME" ]; then
+            echo "ERROR: Could not detect applicationId"
+            exit 1
+          fi
+
+          cd "$PROJECT_DIR"
+
+          printf "module.exports = { project: { android: { packageName: '%s' } } };\n" \
+            "$PACKAGE_NAME" > react-native.config.js
+
+          echo "Android package: $PACKAGE_NAME"
+
+      - name: Build APK
+        run: |
+          set -e
+          cd "$ANDROID_DIR"
+          ./gradlew --no-daemon assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: LauncherX-APK
+          path: extracted/**/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
