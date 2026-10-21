@@ -1,9 +1,11 @@
+
 name: Build LauncherX APK
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -27,23 +29,32 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Extract project ZIP
+      - name: Extract ZIP
         run: |
           set -e
-          ZIP_FILE="Launcherx-main.zip"
+          mkdir -p extracted
+          unzip -q Launcherx-main.zip -d extracted
 
-          if [ ! -f "$ZIP_FILE" ]; then
-            echo "ERROR: Launcherx-main.zip not found"
-            exit 1
+      - name: Inspect project
+        run: |
+          echo "===== PROJECT FILES ====="
+          find extracted/Launcherx-main -maxdepth 3 -type f | head -150
+
+          echo "===== PACKAGE JSON ====="
+          if [ -f extracted/Launcherx-main/package.json ]; then
+            cat extracted/Launcherx-main/package.json
           fi
 
-          mkdir -p extracted
-          unzip -q "$ZIP_FILE" -d extracted
+          echo "===== ANDROID BUILD FILES ====="
+          find extracted -type f \( \
+            -name gradlew -o \
+            -name settings.gradle -o \
+            -name settings.gradle.kts -o \
+            -name build.gradle -o \
+            -name build.gradle.kts \
+          \) | head -100
 
-          echo "Extracted project files:"
-          ls -la extracted
-
-      - name: Locate Android project
+      - name: Check Android project
         run: |
           set -e
 
@@ -51,83 +62,22 @@ jobs:
             -name gradlew | head -1)
 
           if [ -z "$GRADLEW" ]; then
-            echo "ERROR: No gradlew found inside ZIP"
-            echo "Searching for Android build files:"
-            find extracted -type f \
-              \( -name build.gradle \
-              -o -name build.gradle.kts \
-              -o -name package.json \) | head -100
+            echo "No Gradle wrapper found."
+            echo "The project may need Android build files."
             exit 1
           fi
 
           ANDROID_DIR=$(dirname "$GRADLEW")
-          PROJECT_DIR=$(dirname "$ANDROID_DIR")
-
           echo "ANDROID_DIR=$ANDROID_DIR" >> "$GITHUB_ENV"
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
           chmod +x "$GRADLEW"
-
-          echo "Android directory: $ANDROID_DIR"
-          echo "Project directory: $PROJECT_DIR"
-          ls -la "$PROJECT_DIR"
-
-      - name: Install Node dependencies
-        run: |
-          set -e
-
-          if [ -f "$PROJECT_DIR/package-lock.json" ]; then
-            cd "$PROJECT_DIR"
-            npm ci
-          elif [ -f "$PROJECT_DIR/package.json" ]; then
-            cd "$PROJECT_DIR"
-            npm install
-          else
-            echo "ERROR: package.json not found beside Android directory"
-            find extracted -type f \
-              -name package.json | head -50
-            exit 1
-          fi
-
-      - name: Configure React Native package
-        run: |
-          set -e
-
-          GRADLE_FILE="$ANDROID_DIR/app/build.gradle"
-
-          if [ ! -f "$GRADLE_FILE" ]; then
-            GRADLE_FILE="$ANDROID_DIR/app/build.gradle.kts"
-          fi
-
-          if [ ! -f "$GRADLE_FILE" ]; then
-            echo "ERROR: Android app Gradle file not found"
-            exit 1
-          fi
-
-          PACKAGE_NAME=$(grep -E \
-            'applicationId[[:space:]]+["'\''][^"'\'']+["'\'']' \
-            "$GRADLE_FILE" | head -1 | \
-            sed -E 's/.*applicationId[[:space:]]+["'\'']([^"'\'']+)["'\''].*/\1/')
-
-          if [ -z "$PACKAGE_NAME" ]; then
-            echo "ERROR: Could not detect applicationId"
-            exit 1
-          fi
-
-          cd "$PROJECT_DIR"
-
-          printf "module.exports = { project: { android: { packageName: '%s' } } };\n" \
-            "$PACKAGE_NAME" > react-native.config.js
-
-          echo "Android package: $PACKAGE_NAME"
 
       - name: Build APK
         run: |
-          set -e
           cd "$ANDROID_DIR"
           ./gradlew --no-daemon assembleDebug
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: LauncherX-APK
