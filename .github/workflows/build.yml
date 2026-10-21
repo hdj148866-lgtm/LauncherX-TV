@@ -6,6 +6,7 @@ on:
   push:
     paths:
       - 'LauncherX-TV.zip'
+      - 'Launcherx-main.zip'
       - '.github/workflows/build.yml'
 
 permissions:
@@ -30,59 +31,43 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Find and extract project
+      - name: Extract original project
         run: |
           ZIP_FILE=$(find . -maxdepth 1 -type f -iname '*.zip' | head -n 1)
-          if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: Project ZIP not found in repository root."
-            exit 1
-          fi
-
-          mkdir -p source
+          test -n "$ZIP_FILE" || { echo "Project ZIP not found"; exit 1; }
+          mkdir source
           unzip -q "$ZIP_FILE" -d source
-
           PROJECT_DIR=$(find source -name package.json -not -path '*/node_modules/*' -printf '%h\n' | head -n 1)
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: package.json not found."
-            exit 1
-          fi
-
+          test -n "$PROJECT_DIR" || { echo "package.json not found"; exit 1; }
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Create Android project
+      - name: Create Android scaffold
         run: |
           npx @react-native-community/cli@15.1.3 init PS5Launcher --version 0.76.9 --skip-install
 
-      - name: Copy LauncherX source files
+      - name: Apply original LauncherX files
         run: |
           cd PS5Launcher
+          cp "$GITHUB_WORKSPACE/$PROJECT_DIR/package.json" .
+          cp "$GITHUB_WORKSPACE/$PROJECT_DIR/app.json" .
+          cp "$GITHUB_WORKSPACE/$PROJECT_DIR/babel.config.js" .
+          cp "$GITHUB_WORKSPACE/$PROJECT_DIR/metro.config.js" .
+          cp "$GITHUB_WORKSPACE/$PROJECT_DIR/index.js" .
+          cp "$GITHUB_WORKSPACE/$PROJECT_DIR/App.js" .
+          cp -r "$GITHUB_WORKSPACE/$PROJECT_DIR/src" .
 
-          cp "$GITHUB_WORKSPACE/$PROJECT_DIR/package.json" package.json
-          cp "$GITHUB_WORKSPACE/$PROJECT_DIR/app.json" app.json
-          cp "$GITHUB_WORKSPACE/$PROJECT_DIR/babel.config.js" babel.config.js
-          cp "$GITHUB_WORKSPACE/$PROJECT_DIR/metro.config.js" metro.config.js
-          cp "$GITHUB_WORKSPACE/$PROJECT_DIR/index.js" index.js
-          cp "$GITHUB_WORKSPACE/$PROJECT_DIR/App.js" App.js
+          TEMPLATE="$GITHUB_WORKSPACE/$PROJECT_DIR/android-template/app/src/main"
+          test -f "$TEMPLATE/AndroidManifest.xml" || { echo "AndroidManifest.xml missing"; exit 1; }
+          cp "$TEMPLATE/AndroidManifest.xml" android/app/src/main/AndroidManifest.xml
+          cp -r "$TEMPLATE/java/." android/app/src/main/java/
+          cp -r "$TEMPLATE/res/." android/app/src/main/res/
 
-          cp -r "$GITHUB_WORKSPACE/$PROJECT_DIR/src" src
-
-          if [ ! -d "$GITHUB_WORKSPACE/$PROJECT_DIR/android-template/app/src/main" ]; then
-            echo "ERROR: Android template not found."
-            exit 1
-          fi
-
-          cp "$GITHUB_WORKSPACE/$PROJECT_DIR/android-template/app/src/main/AndroidManifest.xml" android/app/src/main/AndroidManifest.xml
-
-          cp -r "$GITHUB_WORKSPACE/$PROJECT_DIR/android-template/app/src/main/java/com/ps5launcher/." android/app/src/main/java/com/ps5launcher/
-
-          cp -r "$GITHUB_WORKSPACE/$PROJECT_DIR/android-template/app/src/main/res/." android/app/src/main/res/
-
-            - name: Install dependencies
+      - name: Install dependencies
         run: |
           cd PS5Launcher
           npm install --legacy-peer-deps
 
-      - name: Build debug APK
+      - name: Build APK
         run: |
           cd PS5Launcher/android
           chmod +x gradlew
@@ -94,4 +79,3 @@ jobs:
           name: LauncherX-APK
           path: PS5Launcher/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-          
