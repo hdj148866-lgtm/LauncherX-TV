@@ -77,10 +77,10 @@ jobs:
 
           cp -r "$GITHUB_WORKSPACE/$PROJECT_DIR/android-template/app/src/main/res/." android/app/src/main/res/
 
-      - name: Install dependencies
+            - name: Install dependencies
         run: |
           cd PS5Launcher
-          npm install
+          npm install --legacy-peer-deps
 
       - name: Build debug APK
         run: |
