@@ -6,6 +6,7 @@ on:
   push:
     paths:
       - 'Launcherx-main.zip'
+      - 'LauncherX-TV.zip'
       - '.github/workflows/build.yml'
 
 permissions:
@@ -14,7 +15,6 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -25,40 +25,95 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Extract project
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Extract project ZIP
+        shell: bash
         run: |
           set -e
-          mkdir extracted
-          unzip -q Launcherx-main.zip -d extracted
-          echo "=== BUILD FILES ==="
-          find extracted -type f \( \
-            -name gradlew -o \
-            -name settings.gradle -o \
-            -name settings.gradle.kts -o \
-            -name build.gradle -o \
-            -name build.gradle.kts \
-          \) -print
-
-      
-      - name: Inspect extracted project
-        run: |
-          echo "=== ROOT FILES ==="
+          mkdir -p extracted
+          ZIP=$(find . -maxdepth 1 -type f \
+            \( -iname 'Launcherx-main.zip' \
+            -o -iname 'LauncherX-TV.zip' \) | head -1)
+          if [ -z "$ZIP" ]; then
+            echo "ERROR: Project ZIP not found."
+            exit 1
+          fi
+          unzip -q "$ZIP" -d extracted
+          echo "=== PROJECT FILES ==="
           find extracted -maxdepth 3 -type f | head -150
-          echo "=== PROJECT MARKERS ==="
-          find extracted -type f \( \
-            -name package.json -o \
-            -name app.json -o \
-            -name gradlew -o \
-            -name settings.gradle -o \
-            -name settings.gradle.kts -o \
-            -name AndroidManifest.xml \
-          \) -print
-          
+
+      - name: Build Android project
+        shell: bash
+        run: |
+          set -e
+          cd "$GITHUB_WORKSPACE"
+
+          GRADLEW=$(find extracted -type f \
+            -name gradlew -print -quit)
+
+          if [ -n "$GRADLEW" ]; then
+            DIR=$(dirname "$GRADLEW")
+            cd "$DIR"
+            chmod +x gradlew
+            ./gradlew assembleDebug
+          elif find extracted -type f \
+            -name package.json | grep -q .; then
+            echo "React Native or JavaScript project detected."
+            echo "Checking for an existing Android Gradle project."
+
+            PKG=$(find extracted -type f \
+              -name package.json -print -quit)
+            DIR=$(dirname "$PKG")
+            cd "$DIR"
+
+            if [ -f package-lock.json ]; then
+              npm ci
+            else
+              npm install
+            fi
+
+            if [ -f android/gradlew ]; then
+              cd android
+              chmod +x gradlew
+              ./gradlew assembleDebug
+            else
+              echo "No Android Gradle project found."
+              echo "This JavaScript project needs Android setup."
+              exit 1
+            fi
+          else
+            echo "No Gradle wrapper or package.json found."
+            echo "Project structure must be reviewed."
+            exit 1
+          fi
+
+      - name: Find and collect APK
+        if: success()
+        shell: bash
+        run: |
+          set -e
+          mkdir -p apk-output
+          find extracted -type f -name '*.apk' \
+            -path '*/build/outputs/apk/*' \
+            -exec cp {} apk-output/ \;
+          if [ -z "$(ls -A apk-output)" ]; then
+            echo "No APK was generated."
+            exit 1
+          fi
+          ls -lh apk-output
 
       - name: Upload APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: LauncherX-APK
-          path: extracted/**/build/outputs/apk/**/*.apk
+          path: apk-output/*.apk
           if-no-files-found: error
+          retention-days: 7
